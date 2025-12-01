@@ -1,22 +1,41 @@
 // src/pages/ResultsPage.jsx
+
+import { useState } from "react";
 import {
   LineChart,
   Line,
   XAxis,
   YAxis,
   Tooltip,
-  CartesianGrid,
   ResponsiveContainer,
+  CartesianGrid,
   Area,
   Legend,
+  BarChart,
+  Bar,
 } from "recharts";
 
 import { computeEnergyModel } from "../core/energyModel";
 import { computeEconomy } from "../core/economy";
+import ThermalMap2D from "../components/ThermalMap2D";
 
-export default function ResultsPage({ data, onBack, onMonteCarlo, onOptimize }) {
+const TABS = [
+  { id: "summary", label: "Итоги" },
+  { id: "losses", label: "Теплопотери" },
+  { id: "thermal", label: "Тепловое поле" },
+  { id: "uncertainty", label: "Неопределённость" },
+  { id: "economy", label: "Экономика" },
+];
+
+export default function ResultsPage({
+  data,
+  onBack,
+  onMonteCarlo,
+  onOptimize,
+}) {
+  const [tab, setTab] = useState("summary");
+
   const model = computeEnergyModel(data);
-
   const {
     climate,
     Tdesign,
@@ -31,211 +50,681 @@ export default function ResultsPage({ data, onBack, onMonteCarlo, onOptimize }) 
     dailyData,
     wallResolved,
     winType,
+    wallArea,
+    windowArea,
+    volume,
   } = model;
 
-  // Экономика годового потребления
-  const eco = computeEconomy(Eyear_kWh);
+  const heatingType = data.heatingType || "electric";
+  const eco = computeEconomy(Eyear_kWh, { heatingType });
+
+  const riskClimate = clamp01(Math.abs(uncert) / 6);
+  const riskInfiltration = clamp01(
+    (data.infiltration ? Number(data.infiltration) : 0.5) / 1.0
+  );
+  const riskBehavior = clamp01(
+    ((data.windowsOpening || "") + (data.occupancy || "")).length /
+      40
+  );
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
+            Результаты расчёта
+          </h1>
+          <p className="text-sm sm:text-base text-slate-600 mt-1 max-w-2xl">
+            Цифровой двойник оценил тепловую нагрузку, годовое
+            потребление энергии, экономику эксплуатации и влияние
+            неопределённости.
+          </p>
+        </div>
 
-      {/* BACK */}
-      <button
-        onClick={onBack}
-        className="px-4 py-2 mb-6 rounded-xl border border-slate-300 hover:bg-slate-100 shadow-sm"
-      >
-        ← Назад
-      </button>
-
-      <h1 className="text-3xl font-semibold mb-6 tracking-tight">
-        Результаты теплотехнического расчёта
-      </h1>
-
-      {/* BUTTONS */}
-      <div className="flex gap-4 mb-8">
-        <button
-          onClick={onMonteCarlo}
-          className="px-4 py-2 bg-purple-600 text-white rounded-xl shadow hover:bg-purple-700"
-        >
-          Монте-Карло (неопределённость)
-        </button>
-
-        <button
-          onClick={onOptimize}
-          className="px-4 py-2 bg-emerald-600 text-white rounded-xl shadow hover:bg-emerald-700"
-        >
-          Подбор улучшений →
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={onBack}
+            className="px-4 py-2 rounded-xl border border-slate-300 text-sm bg-white shadow-sm"
+          >
+            ← Назад к вводу
+          </button>
+          <button
+            onClick={onMonteCarlo}
+            className="px-4 py-2 rounded-xl border border-indigo-500 text-sm text-indigo-600 bg-indigo-50"
+          >
+            Анализ неопределённости
+          </button>
+          <button
+            onClick={onOptimize}
+            className="px-4 py-2 rounded-xl bg-emerald-600 text-sm text-white shadow"
+          >
+            Подбор улучшений
+          </button>
+        </div>
       </div>
 
-      {/* MAIN METRICS */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+      {/* Табы */}
+      <div className="flex flex-wrap gap-1.5 mb-6 rounded-2xl bg-slate-50 p-1.5 border border-slate-200">
+        {TABS.map((t) => {
+          const active = t.id === tab;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`px-3 sm:px-4 py-1.5 rounded-xl text-xs sm:text-sm font-medium transition
+                ${
+                  active
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-600 hover:bg-slate-100"
+                }`}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
 
-        {/* HEATING LOAD */}
-        <div className="p-6 rounded-2xl bg-white shadow-lg border">
-          <h2 className="text-xl font-semibold mb-2">
-            Расчётная тепловая нагрузка
+      {/* Контент вкладок */}
+      {tab === "summary" && (
+        <SummaryTab
+          model={model}
+          eco={eco}
+          heatingType={heatingType}
+        />
+      )}
+      {tab === "losses" && (
+        <LossesTab designRes={designRes} Qdesign={Qdesign} />
+      )}
+      {tab === "thermal" && (
+        <ThermalTab
+          wallArea={wallArea}
+          windowArea={windowArea}
+          Qdesign={Qdesign}
+          T_inside={T_inside}
+          Tdesign={Tdesign}
+          wallResolved={wallResolved}
+          winType={winType}
+        />
+      )}
+      {tab === "uncertainty" && (
+        <UncertaintyTab
+          curveData={curveData}
+          uncert={uncert}
+          riskClimate={riskClimate}
+          riskInfiltration={riskInfiltration}
+          riskBehavior={riskBehavior}
+        />
+      )}
+      {tab === "economy" && (
+        <EconomyTab
+          Eyear_kWh={Eyear_kWh}
+          climate={climate}
+          eco={eco}
+          heatingType={heatingType}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ---------- TAB: SUMMARY ---------- */
+
+function SummaryTab({ model, eco, heatingType }) {
+  const {
+    climate,
+    Tdesign,
+    T_inside,
+    Qdesign,
+    Qmin,
+    Qmax,
+    Eyear_kWh,
+    volume,
+  } = model;
+
+  return (
+    <section className="space-y-5 sm:space-y-6">
+      <div className="grid lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1.4fr)] gap-5 sm:gap-6">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
+          <h2 className="text-sm sm:text-base font-semibold text-slate-900 mb-3">
+            Основные показатели здания
           </h2>
 
-          <p className="text-4xl font-bold text-blue-600">
-            {Math.round(Qdesign).toLocaleString("ru-RU")} Вт
-          </p>
+          <dl className="grid grid-cols-2 gap-3 text-xs sm:text-sm">
+            <div>
+              <dt className="text-slate-500">Расчётная температура</dt>
+              <dd className="font-medium text-slate-900">
+                T<sub>н</sub> = {Tdesign.toFixed(1)} °C
+              </dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">
+                Внутренняя температура
+              </dt>
+              <dd className="font-medium text-slate-900">
+                T<sub>в</sub> = {T_inside.toFixed(1)} °C
+              </dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">
+                Расчётная тепловая нагрузка
+              </dt>
+              <dd className="font-medium text-slate-900">
+                {Math.round(Qdesign).toLocaleString("ru-RU")} Вт
+              </dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Объём здания</dt>
+              <dd className="font-medium text-slate-900">
+                {Math.round(volume).toLocaleString("ru-RU")} м³
+              </dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">
+                Годовое потребление тепла
+              </dt>
+              <dd className="font-medium text-slate-900">
+                {Math.round(Eyear_kWh).toLocaleString("ru-RU")} кВт·ч
+              </dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">
+                Продолжительность отопительного периода
+              </dt>
+              <dd className="font-medium text-slate-900">
+                {climate.hoursHeating.toLocaleString("ru-RU")} ч
+              </dd>
+            </div>
+          </dl>
 
-          <p className="text-slate-600 mt-2">
-            при Tн = {Tdesign}°C, Tв = {T_inside}°C
-          </p>
-
-          {uncert > 0 && (
-            <p className="mt-3 text-slate-700">
-              Диапазон (учёт неопределённости):{" "}
-              <span className="font-semibold">
+          {Qmin !== Qmax && (
+            <p className="mt-3 text-xs sm:text-sm text-slate-600">
+              С учётом неопределённости по климату и эксплуатации
+              диапазон возможной нагрузки:{" "}
+              <span className="font-semibold text-slate-900">
                 {Math.round(Qmin).toLocaleString("ru-RU")} –{" "}
-                {Math.round(Qmax).toLocaleString("ru-RU")} Вт
+                {Math.round(Qmax).toLocaleString("ru-RU")} Вт.
               </span>
             </p>
           )}
-
-          <div className="mt-4 text-xs text-slate-500">
-            Стена: {wallResolved.description} <br />
-            U ≈ {wallResolved.Uwall.toFixed(2)} Вт/м²·К
-          </div>
-
-          <div className="text-xs text-slate-500 mt-1">
-            Окна: {winType.name}, Uw ≈ {winType.Uw.toFixed(2)} Вт/м²·К
-          </div>
         </div>
 
-        {/* ENERGY – ANNUAL */}
-        <div className="p-6 rounded-2xl bg-white shadow-lg border">
-          <h2 className="text-xl font-semibold mb-2">
-            Годовое энергопотребление
-          </h2>
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5 flex flex-col justify-between">
+          <div>
+            <h2 className="text-sm sm:text-base font-semibold text-slate-900 mb-2">
+              Стоимость отопления
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-600 mb-3">
+              Тип системы:{" "}
+              <span className="font-medium text-slate-900">
+                {eco.meta.label}
+              </span>
+            </p>
 
-          <p className="text-3xl font-bold text-emerald-600">
-            {Math.round(Eyear_kWh).toLocaleString("ru-RU")} кВт·ч/год
-          </p>
+            <p className="text-lg sm:text-xl font-semibold text-slate-900">
+              {Math.round(eco.annualCost).toLocaleString("ru-RU")} ₽/год
+            </p>
+            <p className="text-xs sm:text-sm text-slate-600 mt-1">
+              ≈{" "}
+              {Math.round(eco.monthlyCost).toLocaleString("ru-RU")}{" "}
+              ₽/месяц
+            </p>
+          </div>
 
-          <p className="text-slate-600 mt-2">
-            отопительный период: {climate.hoursHeating.toLocaleString("ru-RU")} ч
-          </p>
-
-          <hr className="my-4" />
-
-          <p className="text-md font-semibold text-slate-700">
-            Стоимость отопления: {Math.round(eco.annualCost).toLocaleString("ru-RU")} ₽/год
-          </p>
-
-          <p className="text-slate-600 text-sm mt-1">
-            ≈ {Math.round(eco.monthlyCost).toLocaleString("ru-RU")} ₽/месяц
+          <p className="mt-3 text-[11px] sm:text-xs text-slate-500">
+            Расчёт связан с физической моделью здания и учитывает
+            эффективность выбранной системы отопления.
           </p>
         </div>
-
       </div>
 
-      {/* PARTS TABLE */}
-      <div className="p-6 rounded-2xl bg-white shadow border mb-10">
-        <h3 className="text-lg font-semibold mb-4">
+      {/* кратко: графики */}
+      <div className="grid lg:grid-cols-2 gap-5 sm:gap-6">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
+          <h3 className="text-sm font-semibold text-slate-900 mb-3">
+            Кривая нагрузки Q(T)
+          </h3>
+          <div className="w-full h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={model.curveData}>
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="#e2e8f0"
+                />
+                <XAxis dataKey="T" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip />
+                {model.uncert > 0 && (
+                  <>
+                    <Area
+                      dataKey="Qmax"
+                      stroke={false}
+                      fill="#bfdbfe"
+                      fillOpacity={0.9}
+                      name="Верхняя граница"
+                    />
+                    <Area
+                      dataKey="Qmin"
+                      stroke={false}
+                      fill="#eff6ff"
+                      fillOpacity={1}
+                      name="Нижняя граница"
+                    />
+                  </>
+                )}
+                <Line
+                  type="monotone"
+                  dataKey="Q"
+                  stroke="#2563eb"
+                  strokeWidth={3}
+                  dot={false}
+                  name="Нагрузка, Вт"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
+          <h3 className="text-sm font-semibold text-slate-900 mb-3">
+            Суточный профиль нагрузки (условный зимний день)
+          </h3>
+          <div className="w-full h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={model.dailyData}>
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="#e2e8f0"
+                />
+                <XAxis dataKey="hour" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Line
+                  type="monotone"
+                  dataKey="Q"
+                  stroke="#0f766e"
+                  strokeWidth={3}
+                  dot={false}
+                  name="Нагрузка, Вт"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ---------- TAB: LOSSES ---------- */
+
+function LossesTab({ designRes, Qdesign }) {
+  const parts = designRes.parts;
+  const rows = [
+    { label: "Стены", value: parts.Qwalls },
+    { label: "Окна", value: parts.Qtrans_win },
+    { label: "Инфильтрация", value: parts.Qinf },
+    { label: "Вентиляция", value: parts.Qvent },
+    { label: "Солнечные теплопритоки", value: -parts.Qsolar },
+    { label: "Внутренние теплопритоки", value: -parts.Qinternal },
+  ];
+
+  const chartData = rows.map((r) => ({
+    name: r.label,
+    value: r.value,
+  }));
+
+  return (
+    <section className="space-y-5 sm:space-y-6">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
+        <h2 className="text-sm sm:text-base font-semibold text-slate-900 mb-3">
           Разбивка теплопотерь
-        </h3>
+        </h2>
 
-        <table className="w-full text-sm">
-          <tbody>
-            <Row label="Стены" value={designRes.parts.Qwalls} />
-            <Row label="Окна" value={designRes.parts.Qtrans_win} />
-            <Row label="Инфильтрация" value={designRes.parts.Qinf} />
-            <Row label="Вентиляция" value={designRes.parts.Qvent} />
+        <div className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.3fr)] gap-4 sm:gap-6">
+          <div>
+            <table className="w-full text-xs sm:text-sm">
+              <tbody>
+                {rows.map((r) => (
+                  <LossRow
+                    key={r.label}
+                    label={r.label}
+                    value={r.value}
+                  />
+                ))}
 
-            <Row label="Солнечные" value={-designRes.parts.Qsolar} />
-            <Row label="Внутренние" value={-designRes.parts.Qinternal} />
+                <tr className="border-t border-slate-200">
+                  <td className="py-1.5 pr-2 font-semibold">
+                    Итого нагрузка
+                  </td>
+                  <td className="py-1.5 text-right font-semibold">
+                    {Math.round(Qdesign).toLocaleString("ru-RU")} Вт
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-            <tr className="border-t font-semibold">
-              <td className="py-2">Итого:</td>
-              <td className="py-2 text-right">
-                {Math.round(Qdesign).toLocaleString("ru-RU")} Вт
-              </td>
-            </tr>
-          </tbody>
-        </table>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData}>
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="#e2e8f0"
+                />
+                <XAxis
+                  dataKey="name"
+                  tick={{ fontSize: 10 }}
+                  interval={0}
+                />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Bar dataKey="value" fill="#2563eb" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ---------- TAB: THERMAL FIELD ---------- */
+
+function ThermalTab({
+  wallArea,
+  windowArea,
+  Qdesign,
+  T_inside,
+  Tdesign,
+  wallResolved,
+  winType,
+}) {
+  return (
+    <section className="space-y-5 sm:space-y-6">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
+        <h2 className="text-sm sm:text-base font-semibold text-slate-900 mb-3">
+          Условное температурное поле здания
+        </h2>
+        <p className="text-xs sm:text-sm text-slate-600 mb-4">
+          Карта показывает, как распределяются теплопотери по
+          условной плоскости здания: холодные зоны у наружных стен и
+          окон, более тёплые — во внутренних областях. Это не
+          полноценный расчёт ANSYS, а лёгкая визуализация, связанная
+          с исходными параметрами цифрового двойника.
+        </p>
+
+        <ThermalMap2D
+          wallArea={wallArea}
+          windowArea={windowArea}
+          Qdesign={Qdesign}
+          T_inside={T_inside}
+          Tdesign={Tdesign}
+        />
       </div>
 
-      {/* Q(T) GRAPH */}
-      <div className="p-6 rounded-2xl bg-white shadow border mb-10">
-        <h3 className="text-lg font-semibold mb-4">
-          Зависимость нагрузки Q(T)
-        </h3>
+      <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4 sm:p-5 text-xs sm:text-sm text-slate-600">
+        <p>
+          Стена:{" "}
+          <span className="font-medium">
+            {wallResolved?.label || "пользовательская конструкция"}
+          </span>
+          , U = {wallResolved?.Uwall?.toFixed(3)} Вт/(м²·К)
+        </p>
+        <p>
+          Окна:{" "}
+          <span className="font-medium">
+            {winType?.label || "тип не задан"}
+          </span>
+          , U = {winType?.Uw?.toFixed(2)} Вт/(м²·К)
+        </p>
+      </div>
+    </section>
+  );
+}
+
+/* ---------- TAB: UNCERTAINTY ---------- */
+
+function UncertaintyTab({
+  curveData,
+  uncert,
+  riskClimate,
+  riskInfiltration,
+  riskBehavior,
+}) {
+  return (
+    <section className="space-y-5 sm:space-y-6">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
+        <h2 className="text-sm sm:text-base font-semibold text-slate-900 mb-3">
+          Диапазон возможных теплопотерь
+        </h2>
+        <p className="text-xs sm:text-sm text-slate-600 mb-3">
+          Реальная погода и поведение жильцов отличаются от
+          нормативных. Ширина голубой зоны показывает, насколько
+          “разъезжаются” теплопотери при разумном разбросе параметров.
+        </p>
 
         <div className="w-full h-72">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={curveData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="T" />
-              <YAxis />
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke="#e2e8f0"
+              />
+              <XAxis dataKey="T" tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 11 }} />
               <Tooltip />
-              <Legend />
-
-              <Area
-                dataKey="Qmax"
-                stroke={false}
-                fill="#dbeafe"
-                fillOpacity={0.7}
-              />
-
-              <Area
-                dataKey="Qmin"
-                stroke={false}
-                fill="#eff6ff"
-                fillOpacity={1}
-              />
-
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              {uncert > 0 && (
+                <>
+                  <Area
+                    dataKey="Qmax"
+                    stroke={false}
+                    fill="#bfdbfe"
+                    fillOpacity={0.9}
+                    name="Верхняя граница"
+                  />
+                  <Area
+                    dataKey="Qmin"
+                    stroke={false}
+                    fill="#eff6ff"
+                    fillOpacity={1}
+                    name="Нижняя граница"
+                  />
+                </>
+              )}
               <Line
                 type="monotone"
                 dataKey="Q"
                 stroke="#2563eb"
                 strokeWidth={3}
                 dot={false}
+                name="Номинальный расчёт"
               />
             </LineChart>
           </ResponsiveContainer>
         </div>
       </div>
 
-      {/* DAILY PROFILE */}
-      <div className="p-6 rounded-2xl bg-white shadow border">
-        <h3 className="text-lg font-semibold mb-4">
-          Суточный профиль нагрузки
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
+        <h3 className="text-sm font-semibold text-slate-900 mb-3">
+          Индексы неопределённости
         </h3>
-
-        <div className="w-full h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={dailyData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="hour" />
-              <YAxis />
-              <Tooltip />
-
-              <Line
-                type="monotone"
-                dataKey="Q"
-                stroke="#0f766e"
-                strokeWidth={3}
-                dot={false}
-              />
-            </LineChart>
-          </ResponsiveContainer>
+        <div className="space-y-3">
+          <RiskBar
+            label="Климатическая неопределённость"
+            value={riskClimate}
+          />
+          <RiskBar
+            label="Инфильтрация / герметичность"
+            value={riskInfiltration}
+          />
+          <RiskBar
+            label="Поведение жильцов (окна, график)"
+            value={riskBehavior}
+          />
         </div>
+        <p className="mt-3 text-[11px] sm:text-xs text-slate-500">
+          Для детального анализа распределения теплопотерь по
+          сценариям используется отдельная страница Монте-Карло.
+        </p>
       </div>
-
-    </div>
+    </section>
   );
 }
 
-function Row({ label, value }) {
+/* ---------- TAB: ECONOMY ---------- */
+
+function EconomyTab({ Eyear_kWh, climate, eco, heatingType }) {
+  const scenarios = [
+    {
+      key: "electric",
+      label: "Электроотопление",
+      cost: eco.byTariff.electric_single,
+    },
+    {
+      key: "hpump",
+      label: "Тепловой насос (COP≈3)",
+      cost: eco.byTariff.electric_single / 3,
+    },
+    {
+      key: "gas",
+      label: "Газовый котёл",
+      cost: eco.byTariff.gas,
+    },
+    {
+      key: "district",
+      label: "Центральное отопление",
+      cost: eco.byTariff.district,
+    },
+  ];
+
+  const chartData = scenarios.map((s) => ({
+    name: s.label,
+    cost: s.cost,
+  }));
+
   return (
-    <tr>
-      <td className="py-2 text-slate-600">{label}</td>
-      <td className="py-2 text-right">
+    <section className="space-y-5 sm:space-y-6">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
+        <h2 className="text-sm sm:text-base font-semibold text-slate-900 mb-3">
+          Годовая экономика эксплуатации
+        </h2>
+
+        <p className="text-xs sm:text-sm text-slate-600 mb-3">
+          Для текущего здания годовое теплопотребление составляет{" "}
+          <span className="font-semibold text-slate-900">
+            {Math.round(Eyear_kWh).toLocaleString("ru-RU")} кВт·ч
+          </span>{" "}
+          при продолжительности отопительного периода{" "}
+          <span className="font-semibold text-slate-900">
+            {climate.hoursHeating.toLocaleString("ru-RU")} ч.
+          </span>
+        </p>
+
+        <div className="grid lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1.2fr)] gap-4 sm:gap-6">
+          <div>
+            <p className="text-lg sm:text-xl font-semibold text-slate-900">
+              {Math.round(eco.annualCost).toLocaleString("ru-RU")} ₽/год
+            </p>
+            <p className="text-xs sm:text-sm text-slate-600 mt-1">
+              Текущий выбранный вариант:{" "}
+              <span className="font-medium">
+                {eco.meta.label}
+              </span>{" "}
+              (≈{" "}
+              {Math.round(eco.monthlyCost).toLocaleString("ru-RU")}{" "}
+              ₽/мес).
+            </p>
+
+            <p className="mt-3 text-[11px] sm:text-xs text-slate-500">
+              Разные системы отопления дают разную стоимость владения
+              при одинаковой тепловой нагрузке здания.
+            </p>
+
+            {heatingType === "gas" && eco.carrier.gas_m3 > 0 && (
+              <p className="mt-3 text-[11px] sm:text-xs text-slate-500">
+                Оценочный расход газа:{" "}
+                {eco.carrier.gas_m3.toFixed(1)} м³/год при КПД котла{" "}
+                {Math.round(
+                  eco.assumptions.boilerEfficiency * 100
+                )}
+                % и теплоте сгорания{" "}
+                {eco.assumptions.gasHeatValue} кВт·ч/м³.
+              </p>
+            )}
+          </div>
+
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData}>
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="#e2e8f0"
+                />
+                <XAxis
+                  dataKey="name"
+                  tick={{ fontSize: 10 }}
+                  interval={0}
+                />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip
+                  formatter={(val) =>
+                    `${Math.round(val).toLocaleString("ru-RU")} ₽/год`
+                  }
+                />
+                <Bar dataKey="cost" fill="#0f766e" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4 sm:p-5 text-xs sm:text-sm text-slate-600">
+        В дальнейшем сюда можно добавить детальную экономику:
+        сравнение сценариев “до/после” утепления, замену окон,
+        установку рекуперации и расчёт срока окупаемости по годам.
+      </div>
+    </section>
+  );
+}
+
+/* ---------- ВСПОМОГАТЕЛЬНОЕ ---------- */
+
+function LossRow({ label, value }) {
+  return (
+    <tr className="border-b border-slate-100">
+      <td className="py-1.5 pr-2 text-slate-600">{label}</td>
+      <td className="py-1.5 text-right font-medium text-slate-900">
         {Math.round(value).toLocaleString("ru-RU")} Вт
       </td>
     </tr>
   );
+}
+
+function RiskBar({ label, value }) {
+  const percent = Math.round(clamp01(value) * 100);
+  let color = "bg-emerald-500";
+  if (percent >= 33 && percent < 66) color = "bg-amber-500";
+  if (percent >= 66) color = "bg-red-500";
+
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-[11px] sm:text-xs text-slate-500">
+        <span>{label}</span>
+        <span>{percent}%</span>
+      </div>
+      <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+        <div
+          className={`h-full ${color} transition-all`}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function clamp01(x) {
+  if (x < 0) return 0;
+  if (x > 1) return 1;
+  return x;
 }

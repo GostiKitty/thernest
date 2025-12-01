@@ -1,1 +1,222 @@
 @import "tailwindcss";
+/* ===== TherNest building preview ===== */
+
+.building-preview-wrapper {
+  @apply bg-white/80 border border-slate-200 rounded-2xl shadow-md p-4 sm:p-5;
+}
+
+.building-preview-card {
+  @apply relative;
+}
+
+/* 3D контейнер */
+.building-3d {
+  position: relative;
+  margin: 0 auto;
+  width: 120px;
+  height: 180px;
+  transform-style: preserve-3d;
+  transform: rotateY(-22deg) rotateX(10deg) translateY(4px);
+  animation: buildingFloat 4.5s ease-in-out infinite;
+  transform-origin: 50% 100%;
+}
+
+/* фасад */
+.building-3d-front {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, #eff6ff, #dbeafe);
+  border-radius: 0.75rem;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
+  transform: translateZ(12px);
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px;
+  gap: 3px;
+}
+
+/* боковая грань */
+.building-3d-side {
+  position: absolute;
+  inset: 0;
+  width: 40px;
+  background: linear-gradient(180deg, #dbeafe, #bfdbfe);
+  border-radius: 0.75rem;
+  transform-origin: left;
+  transform: rotateY(90deg) translateZ(120px);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.35);
+}
+
+/* крыша */
+.building-3d-top {
+  position: absolute;
+  inset-inline: 0;
+  height: 40px;
+  background: radial-gradient(circle at 30% 30%, #e0f2fe, #bfdbfe);
+  border-radius: 0.75rem;
+  transform-origin: bottom;
+  transform: rotateX(90deg) translateZ(180px);
+}
+
+/* этажи */
+.building-floor-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+/* окна */
+.building-window {
+  height: 10px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #1d4ed8, #60a5fa);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.12);
+}
+
+/* анимация плавания */
+@keyframes buildingFloat {
+  0% {
+    transform: rotateY(-22deg) rotateX(10deg) translateY(4px);
+  }
+  50% {
+    transform: rotateY(-15deg) rotateX(8deg) translateY(-4px);
+  }
+  100% {
+    transform: rotateY(-22deg) rotateX(10deg) translateY(4px);
+  }
+}
+/* ==== TherNest base cards & tags ==== */
+
+.tn-card {
+  @apply bg-white/90 border border-slate-200 rounded-2xl shadow-md p-4 sm:p-5;
+}
+
+.tn-tag {
+  @apply text-[10px] uppercase tracking-[0.16em] text-slate-500;
+}
+
+.tn-badge {
+  @apply inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold tracking-wide;
+}
+
+.tn-badge-blue {
+  @apply bg-blue-50 text-blue-700 border border-blue-100;
+}
+
+/* ==== 3D-здание (цифровой двойник) ==== */
+
+.tn-building-root {
+  position: relative;
+  width: 120px;
+  height: 180px;
+  transform-style: preserve-3d;
+  transform: perspective(650px) rotateX(18deg) rotateY(-26deg);
+}
+
+/* нижняя плита */
+.tn-building-base {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 22px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 50% 10%, #0f172a, #020617);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.7);
+}
+
+/* "тень" */
+.tn-building-shadow {
+  position: absolute;
+  inset-inline: -20px;
+  bottom: -10px;
+  height: 32px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 50% 50%, rgba(15, 23, 42, 0.6), transparent);
+  filter: blur(8px);
+}
+
+/* башня */
+.tn-building-tower {
+  position: absolute;
+  inset: 0;
+  margin-inline: auto;
+  width: 70px;
+  border-radius: 18px;
+  padding: 8px 6px;
+  background: linear-gradient(180deg, #1d4ed8, #2563eb, #0f172a);
+  box-shadow:
+    0 14px 40px rgba(37, 99, 235, 0.6),
+    0 0 0 1px rgba(148, 163, 184, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transform: translateZ(16px);
+  animation: tnTowerFloat 5.5s ease-in-out infinite;
+}
+
+/* этажи */
+.tn-building-floor {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+}
+
+/* окна */
+.tn-building-window {
+  height: 9px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 20% 10%, #e0f2fe, #38bdf8, #1e40af);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.35);
+}
+
+/* лёгкое смещение окон для ощущения 3D */
+.tn-window-left {
+  transform: translateX(-1px);
+}
+.tn-window-center {
+  transform: translateY(1px);
+}
+.tn-window-right {
+  transform: translateX(1px);
+}
+
+/* подсветка контура */
+.tn-building-glow {
+  position: absolute;
+  inset: 10px 8px auto 8px;
+  height: 24px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 50% 0%, rgba(96, 165, 250, 0.6), transparent);
+  filter: blur(6px);
+}
+
+/* цифровая сетка позади */
+.tn-building-grid {
+  position: absolute;
+  inset: -12px -32px 0 -32px;
+  border-radius: 999px;
+  background-image: linear-gradient(
+      rgba(148, 163, 184, 0.18) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      rgba(148, 163, 184, 0.18) 1px,
+      transparent 1px
+    );
+  background-size: 14px 14px;
+  transform: translateZ(-40px) translateY(12px);
+  opacity: 0.55;
+}
+
+/* анимация "плавающей" башни */
+@keyframes tnTowerFloat {
+  0% {
+    transform: translateZ(16px) translateY(2px);
+  }
+  50% {
+    transform: translateZ(18px) translateY(-4px);
+  }
+  100% {
+    transform: translateZ(16px) translateY(2px);
+  }
+}

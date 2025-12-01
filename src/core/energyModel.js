@@ -1,13 +1,22 @@
 // src/core/energyModel.js
 
+import { describeWallFromInput } from "./uvalue";
 import {
-  resolveWallFromData,
-  getWindowTypeForData,
-} from "../data/buildingDB";
+  infiltrationHeatLoss,
+  ventilationHeatLoss,
+} from "./infiltration";
+import { computeSolarGains } from "./solar";
+import { computeCondensationRisk } from "./riskCondensation";
+
+import { getWindowTypeForData } from "../data/buildingDB";
 import {
   getClimateDesignData,
   getHourlyClimate,
 } from "./climate";
+
+// ----------------------------------------------------
+// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+// ----------------------------------------------------
 
 function normNum(val, def) {
   const n =
@@ -17,19 +26,12 @@ function normNum(val, def) {
   return Number.isFinite(n) ? n : def;
 }
 
-function guessInfiltration(tightnessTxt) {
-  const t = (tightnessTxt || "").toLowerCase();
-  if (t.includes("низ")) return 0.8;
-  if (t.includes("выс")) return 0.3;
-  if (t.includes("гермет")) return 0.25;
-  return 0.5; // среднее значение ACH
-}
-
+// Внутренние теплопритоки (Вт/м²) — по описанию эксплуатации
 function internalGainSpecific(data) {
   const occ = (data.occupancy || "").toLowerCase();
   const app = (data.appliances || "").toLowerCase();
 
-  let q = 3; // базовые внутренние теплопритоки, Вт/м²
+  let q = 3; // базовый уровень, Вт/м²
 
   if (occ.includes("выход") || occ.includes("всегда")) q += 2;
   if (occ.includes("вечер")) q += 1;
@@ -41,9 +43,21 @@ function internalGainSpecific(data) {
   return q;
 }
 
-// ----- ГЛАВНАЯ ФУНКЦИЯ РАСЧЁТА -----
+// Гауссовский случайный множитель для Монте-Карло
+function randFactor(sigma) {
+  const u = Math.random() || 1e-6;
+  const v = Math.random() || 1e-6;
+  const z =
+    Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  return 1 + z * sigma;
+}
+
+// ----------------------------------------------------
+// ОСНОВНАЯ МОДЕЛЬ: РАСЧЁТ ТЕПЛОВОЙ НАГРУЗКИ И ГОДОВОГО ЭНЕРГОПОТРЕБЛЕНИЯ
+// ----------------------------------------------------
 
 export function computeEnergyModel(data) {
+  // Геометрия
   const floors = normNum(data.floors, 1);
   const area = normNum(data.area, 100);
   const height = normNum(data.height, 2.7);
@@ -52,92 +66,99 @@ export function computeEnergyModel(data) {
 
   const volume = area * floors * height;
 
-  // внешняя площадь стен: ориентировочное отношение "поверхность / площадь"
-  const shapeFactor = 2.6; // для многоквартирного/рядового здания
+  // Оценка внешней площади стен (shape factor)
+  const shapeFactor = 2.6; // типично для многоквартирных/рядовых домов
   const wallArea = shapeFactor * area;
 
-  // стена из конструкций/текста
-  const wallResolved = resolveWallFromData({
+  // Стены: слои + U-value из нашего Physics Engine
+  const wallResolved = describeWallFromInput({
     constructionKey: data.constructionKey,
-    wallMaterial: data.wallDescription || data.wallMaterial,
+    wallDescription: data.wallDescription || data.wallMaterial,
   });
-
   const Uwall = wallResolved.Uwall;
 
-  // окна
+  // Окна
   const windowArea = normNum(
     data.windowArea,
-    area * 0.2 // по умолчанию 20% остекление
+    area * 0.2 // по умолчанию 20% остекления
   );
+  const winType = getWindowTypeForData(data);
+  const Uw = winType.Uw ?? 1.2;
+  const gValue = winType.gValue ?? 0.5;
 
-  const winType = getWindowTypeForData({
-    windowType: data.windowTypeKey,
-  });
-
-  const Uw = winType.Uw;
-  const psi = winType.psi || 0.05;
-  const Lf = 4 * Math.sqrt(Math.max(windowArea, 0.01)); // периметр условного окна
-
-  // климат
+  // Климат и расчётная температура наружного воздуха
   const climate = getClimateDesignData(
     data.city,
     data.winterType,
-    uncertainty
+    data.uncertainty
   );
-
   const Tdesign = climate.Tdesign;
   const T_inside = tempInside;
-  const dT = T_inside - Tdesign;
+  const dT = T_inside - Tdesign || 0.0001; // защищаемся от нуля
 
-  // воздух
-  const rho = 1.2; // кг/м³
-  const cp = 1005; // Дж/(кг·К)
+  // -------------------------------------
+  // СОСТАВЛЯЮЩИЕ ТЕПЛОВОГО БАЛАНСА
+  // -------------------------------------
 
-  const ach_inf = normNum(
-    data.infiltration,
-    guessInfiltration(data.tightness)
-  );
-  const mdot_inf = (rho * volume * ach_inf) / 3600;
-
-  const ach_vent = 0.35; // простой нормативный расход
-  const mdot_vent = (rho * volume * ach_vent) / 3600;
-
-  // потери
+  // 1) Теплопотери через стены и окна
   const Qwalls = Uwall * wallArea * dT;
-  const Qtrans_win = Uw * windowArea * dT + psi * Lf * dT;
-  const Qinf = mdot_inf * cp * dT;
-  const Qvent = mdot_vent * cp * dT;
+  const Qtrans_win = Uw * windowArea * dT;
 
-  // солнечные поступления (очень грубо)
-  const I_design = 150; // Вт/м²
-  const etaSolar = 0.6;
-  const Qsolar =
-    windowArea * winType.gValue * I_design * etaSolar;
+  // 2) Инфильтрация и вентиляция (из Physics Engine)
+  const windSpeed = normNum(data.wind, 3);
+  const Qinf = infiltrationHeatLoss({
+    volume,
+    dT,
+    userACH: data.infiltration,
+    tightness: data.tightness,
+    windSpeed,
+    floors,
+  });
 
-  // внутренние теплопритоки
+  const Qvent = ventilationHeatLoss({
+    volume,
+    dT,
+    occupancy: data.occupancy,
+  });
+
+  // 3) Солнечные теплопритоки (очень упрощённые)
+  const Qsolar = computeSolarGains({
+    windowArea,
+    gValue,
+    orientation: data.orientation,
+    shadingFactor: data.shadingFactor,
+    climateKey: climate.key,
+    season: "winter",
+  });
+
+  // 4) Внутренние теплопритоки (люди + техника)
   const q_int = internalGainSpecific(data); // Вт/м²
   const Qinternal = q_int * area;
 
-  // итоговая расчётная нагрузка
+  // Итоговая расчётная нагрузка
   const Qdesign =
     Qwalls + Qtrans_win + Qinf + Qvent - Qsolar - Qinternal;
 
-  // диапазон с учётом неопределённости по температуре
+  // Диапазон с учётом неопределённости по температуре
   let Qmin = Qdesign;
   let Qmax = Qdesign;
-  if (dT !== 0 && uncertainty > 0) {
+  if (uncertainty > 0) {
     const dTmin = dT - uncertainty;
     const dTmax = dT + uncertainty;
     const k = Qdesign / dT;
+
     Qmin = k * dTmin;
     Qmax = k * dTmax;
   }
 
   // Годовое потребление по HDD-методу
-  const k_tot = dT === 0 ? 0 : Qdesign / dT; // Вт/К
+  const k_tot = Qdesign / dT; // Вт/К
   const Eyear_kWh = (k_tot * climate.HDD * 24) / 1000;
 
-  // Кривая Q(T)
+  // -------------------------------------
+  // КРИВАЯ Q(T)
+  // -------------------------------------
+
   const curveData = [];
   for (let T = 5; T >= Tdesign - 5; T -= 1) {
     const dTloc = T_inside - T;
@@ -152,35 +173,52 @@ export function computeEnergyModel(data) {
 
     curveData.push({
       T,
-      Q: Qloc,
-      Qmin: QminLoc,
-      Qmax: QmaxLoc,
+      Q: Math.max(0, Qloc),
+      Qmin: Math.max(0, QminLoc),
+      Qmax: Math.max(0, QmaxLoc),
     });
   }
 
-  // Условный суточный профиль
+  // -------------------------------------
+  // СУТОЧНЫЙ ПРОФИЛЬ (УСЛОВНЫЙ ЗИМНИЙ ДЕНЬ)
+  // -------------------------------------
+
   const dailyData = [];
-  for (let h = 0; h < 24; h++) {
-    const factor =
-      0.85 +
-      0.3 * Math.sin(((h - 6) / 24) * 2 * Math.PI) -
-      0.2 * Math.sin(((h - 14) / 24) * 2 * Math.PI);
+  const occ = (data.occupancy || "").toLowerCase();
+
+  for (let hour = 0; hour < 24; hour++) {
+    let factor = 1;
+
+    if (occ.includes("вечер")) {
+      factor = hour >= 18 && hour <= 23 ? 1.0 : 0.7;
+    } else if (occ.includes("ноч") || occ.includes("смен")) {
+      factor = hour >= 22 || hour < 6 ? 1.0 : 0.7;
+    } else if (
+      occ.includes("всегда") ||
+      occ.includes("дом") ||
+      occ.includes("круглосуточ")
+    ) {
+      factor = 1.0;
+    } else {
+      factor = hour >= 7 && hour <= 23 ? 1.0 : 0.6;
+    }
+
     dailyData.push({
-      hour: h,
-      Q: Qdesign * factor,
+      hour,
+      Q: Math.max(0, Qdesign * factor),
     });
   }
 
-  const designRes = {
-    parts: {
-      Qwalls,
-      Qtrans_win,
-      Qinf,
-      Qvent,
-      Qsolar,
-      Qinternal,
-    },
-  };
+  // -------------------------------------
+  // РИСК КОНДЕНСАЦИИ И ПЛЕСЕНИ
+  // -------------------------------------
+
+  const condRisk = computeCondensationRisk({
+    T_inside: T_inside,
+    T_out: Tdesign,
+    RH_inside: normNum(data.RH_inside, 50),
+    Uwall,
+  });
 
   return {
     climate,
@@ -191,7 +229,19 @@ export function computeEnergyModel(data) {
     Qmin,
     Qmax,
     Eyear_kWh,
-    designRes,
+    designRes: {
+      parts: {
+        Qwalls,
+        Qtrans_win,
+        Qinf,
+        Qvent,
+        Qsolar,
+        Qinternal,
+      },
+      Uwall,
+      Uw,
+      wallResolved,
+    },
     curveData,
     dailyData,
     wallResolved,
@@ -199,52 +249,61 @@ export function computeEnergyModel(data) {
     wallArea,
     windowArea,
     volume,
+    condRisk,
   };
 }
 
-// ----- Почасовая модель для 8760 ч -----
+// ----------------------------------------------------
+// ПОЧАСОВАЯ МОДЕЛЬ ДЛЯ 8760 ЧАСОВ
+// ----------------------------------------------------
 
 export function computeHourlyLoad(data) {
   const model = computeEnergyModel(data);
   const climateHours = getHourlyClimate(data.city);
 
   const k_tot =
-    model.T_inside === model.Tdesign
+    model.T_inside - model.Tdesign === 0
       ? 0
-      : model.Qdesign / (model.T_inside - model.Tdesign);
+      : model.Qdesign /
+        (model.T_inside - model.Tdesign || 0.0001);
 
-  return climateHours.map((pt) => {
+  const hourly = climateHours.map((pt) => {
     const dT = model.T_inside - pt.T;
     const Q = Math.max(0, k_tot * dT);
     return Q;
   });
+
+  return hourly;
 }
 
-// ----- Монте-Карло -----
+// ----------------------------------------------------
+// МОНТЕ-КАРЛО: АНАЛИЗ НЕОПРЕДЕЛЁННОСТИ
+// ----------------------------------------------------
 
-function randFactor(sigma) {
-  // гауссовский множитель ~ N(1, sigma)
-  const u = Math.random() || 1e-6;
-  const v = Math.random() || 1e-6;
-  const z =
-    Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-  return 1 + sigma * z;
-}
-
-export function monteCarloSim(data, count = 500) {
+export function monteCarloSim(data, nSamples = 500) {
   const res = [];
 
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < nSamples; i++) {
     const d = { ...data };
 
-    d.height = normNum(data.height, 2.7) * randFactor(0.05);
-    d.area = normNum(data.area, 100) * randFactor(0.03);
+    d.area = normNum(data.area, 100) * randFactor(0.05);
+    d.floors = normNum(data.floors, 1) * randFactor(0.05);
+    d.height = normNum(data.height, 2.7) * randFactor(0.03);
+
+    d.windowArea =
+      normNum(
+        data.windowArea,
+        normNum(data.area, 100) * 0.2
+      ) * randFactor(0.15);
+
     d.infiltration =
-      normNum(data.infiltration, 0.5) * randFactor(0.3);
+      normNum(data.infiltration, 0.5) * randFactor(0.4);
+    d.wind = normNum(data.wind, 3) * randFactor(0.3);
+
     d.tempInside =
-      normNum(data.tempInside, 22) * randFactor(0.03);
+      normNum(data.tempInside, 22) * randFactor(0.01);
     d.uncertainty =
-      normNum(data.uncertainty, 3) * randFactor(0.3);
+      normNum(data.uncertainty, 3) * randFactor(0.5);
 
     const m = computeEnergyModel(d);
     res.push({

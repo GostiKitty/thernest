@@ -3,20 +3,16 @@
 import { computeEnergyModel } from "./energyModel";
 
 export function computeHourlyBalance(data, epwData) {
-  // получаем базовый расчёт и климат
   const base = computeEnergyModel(data);
 
   const T_inside = base.T_inside;
   const model = base;
+  const volume = model.volume;
 
   const hours = epwData.hours.map((h) => {
     const Tout = h.Tout;
     const G = h.G_solar;
 
-    // тепловой баланс по формуле из energyModel
-    const res = model.designRes; // временно используем структуру
-
-    // SN: использовали формулу из energyModel:
     function Q_total(Tout, Gwin) {
       const dT = T_inside - Tout;
 
@@ -31,26 +27,33 @@ export function computeHourlyBalance(data, epwData) {
       const rho = 1.2;
       const cp = 1005;
 
-      const mdot_inf =
-        (rho *
-          (data.area * data.floors * data.height) *
-          (data.ach || 0.5)) /
-        3600;
+      const infilACH = (() => {
+        const n = parseFloat(data.infiltration);
+        return Number.isFinite(n) ? n : 0.5;
+      })();
 
-      const mdot_vent =
-        (rho *
-          (data.area * data.floors * data.height) *
-          0.35) /
-        3600;
+      const mdot_inf = (rho * volume * infilACH) / 3600;
+
+      const mdot_vent = (rho * volume * 0.35) / 3600;
+      const recupEff = Math.min(
+        Math.max(parseFloat(data.recuperation || 0) || 0, 0),
+        0.9
+      );
 
       const Qinf = mdot_inf * cp * dT;
-      const Qvent = mdot_vent * cp * dT;
+      const Qvent_raw = mdot_vent * cp * dT;
+      const Qvent = Qvent_raw * (1 - recupEff);
 
       const etaSolar = 0.6;
-      const Qsolar = model.windowArea * model.winType.gValue * G * etaSolar;
+      const Qsolar = model.windowArea * model.winType.gValue * Gwin * etaSolar;
 
       return (
-        Qwalls + Qwin + Qinf + Qvent - Qsolar - model.designRes.parts.Qinternal
+        Qwalls +
+        Qwin +
+        Qinf +
+        Qvent -
+        Qsolar -
+        model.designRes.parts.Qinternal
       );
     }
 
@@ -64,7 +67,6 @@ export function computeHourlyBalance(data, epwData) {
     };
   });
 
-  // месячные суммы (примерно 730 часов в месяц)
   const months = Array.from({ length: 12 }).map((_, m) => {
     const start = m * 730;
     const end = start + 730;

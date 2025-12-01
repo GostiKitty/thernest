@@ -1,3 +1,5 @@
+// src/data/buildingDB.js
+
 //--------------------------------------------------------
 // ПОДСКАЗКИ ДЛЯ ПОЛЕЙ ВВОДА
 //--------------------------------------------------------
@@ -33,7 +35,7 @@ export const SUGGEST_WINDOWS = [
 ];
 
 //--------------------------------------------------------
-// БАЗА МАТЕРИАЛОВ
+// БАЗА МАТЕРИАЛОВ ДЛЯ ПАРСЕРА ТЕКСТОВЫХ СТЕН
 //--------------------------------------------------------
 
 export const MATERIALS = {
@@ -50,7 +52,7 @@ export const MATERIALS = {
 };
 
 //--------------------------------------------------------
-// ГОТОВЫЕ КОНСТРУКЦИИ
+// ГОТОВЫЕ КОНСТРУКЦИИ СТЕН
 //--------------------------------------------------------
 
 export const CONSTRUCTIONS = {
@@ -145,7 +147,7 @@ export function calcUFromLayers(layers) {
 }
 
 //--------------------------------------------------------
-// СБОРКА СТЕНЫ
+// СБОРКА СТЕНЫ ИЗ ДАННЫХ ПОЛЬЗОВАТЕЛЯ
 //--------------------------------------------------------
 
 export function resolveWallFromData({ constructionKey, wallDescription }) {
@@ -199,81 +201,32 @@ export const WINDOW_TYPES = [
 ];
 
 export function getWindowTypeForData(data) {
-  if (!data.windowTypeKey) return WINDOW_TYPES[0];
-  return WINDOW_TYPES.find((w) => w.key === data.windowTypeKey) || WINDOW_TYPES[0];
+  const key = data.windowTypeKey || data.windowType || "";
+  if (!key) return WINDOW_TYPES[0];
+  return WINDOW_TYPES.find((w) => w.key === key) || WINDOW_TYPES[0];
 }
 
 //--------------------------------------------------------
-// ТИПОВЫЕ ЗДАНИЯ
+// ТИПОВЫЕ ЗДАНИЯ — ПРИМЕНЕНИЕ
 //--------------------------------------------------------
 
-export const ARCHETYPES = [
-  {
-    key: "p44_panel",
-    name: "Панельный дом П-44 (9 этажей)",
-    defaults: {
-      floors: 9,
-      area: 450,
-      height: 2.7,
-      constructionKey: "panel_300",
-      windowTypeKey: "std_2ch",
-      windowArea: 45,
-      infiltration: 0.5,
-    },
-  },
-  {
-    key: "khrushchev",
-    name: "Кирпичная пятиэтажка",
-    defaults: {
-      floors: 5,
-      area: 350,
-      height: 2.5,
-      constructionKey: "brick_380_mw100",
-      windowTypeKey: "std_2ch",
-      windowArea: 35,
-      infiltration: 0.7,
-    },
-  },
-  {
-    key: "aerated_house",
-    name: "Газобетонный дом (2 этажа)",
-    defaults: {
-      floors: 2,
-      area: 160,
-      height: 2.8,
-      constructionKey: "aerated_300",
-      windowTypeKey: "std_3ch",
-      windowArea: 24,
-      infiltration: 0.4,
-    },
-  },
-  {
-    key: "frame_house",
-    name: "Каркасный дом (2 этажа)",
-    defaults: {
-      floors: 2,
-      area: 140,
-      height: 2.6,
-      constructionKey: "frame_insulated",
-      windowTypeKey: "std_3ch",
-      windowArea: 22,
-      infiltration: 0.5,
-    },
-  },
-];
-
-//--------------------------------------------------------
-// ПРИМЕНЕНИЕ ТИПОВОГО ДОМА
-//--------------------------------------------------------
+// Берём расширенный список архетипов из отдельного файла
+import { ARCHETYPES } from "./archetypes";
 
 export function applyArchetypeDefaults(key, prev) {
   const arch = ARCHETYPES.find((a) => a.key === key);
   if (!arch) return prev;
 
+  const { defaults } = arch;
+
   return {
     ...prev,
     archetypeKey: key,
-    ...arch.defaults,
-    wallDescription: CONSTRUCTIONS[arch.defaults.constructionKey]?.description,
+    ...defaults,
+    wallDescription: defaults.constructionKey
+      ? CONSTRUCTIONS[defaults.constructionKey]?.description ||
+        prev.wallDescription ||
+        ""
+      : prev.wallDescription || "",
   };
 }
