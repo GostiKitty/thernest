@@ -1,4 +1,8 @@
 // src/pages/ResultsPage.jsx
+import { computeCondensationRisk } from "../core/riskCondensation";
+import ThermalMap2DPro from "../components/ThermalMap2DPro";
+
+import GradientLegend from "../components/GradientLegend";
 
 import { useState } from "react";
 import {
@@ -430,6 +434,8 @@ function LossesTab({ designRes, Qdesign }) {
 
 /* ---------- TAB: THERMAL FIELD ---------- */
 
+/* ---------- TAB: THERMAL FIELD (NEW PROFESSIONAL VERSION) ---------- */
+
 function ThermalTab({
   wallArea,
   windowArea,
@@ -439,48 +445,101 @@ function ThermalTab({
   wallResolved,
   winType,
 }) {
+  const Uwall = wallResolved?.Uwall ?? 1.0;
+  const Uw = winType?.Uw ?? 1.2;
+
+  // Температура внутренней поверхности
+  const Tsi_wall =
+    T_inside - Uwall * (T_inside - Tdesign) * 0.13; // Rsi = 0.13
+  const Tsi_win =
+    T_inside - Uw * (T_inside - Tdesign) * 0.13;
+
+  const risk = computeCondensationRisk({
+    T_inside,
+    T_out: Tdesign,
+    Uwall,
+    RH_inside: 50,
+  });
+
   return (
-    <section className="space-y-5 sm:space-y-6">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
-        <h2 className="text-sm sm:text-base font-semibold text-slate-900 mb-3">
-          Условное температурное поле здания
+    <section className="space-y-6">
+      {/* Карточка с тепловой картой */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+        <h2 className="text-base font-semibold text-slate-900 mb-2">
+          Температурное поле ограждающих конструкций
         </h2>
-        <p className="text-xs sm:text-sm text-slate-600 mb-4">
-          Карта показывает, как распределяются теплопотери по
-          условной плоскости здания: холодные зоны у наружных стен и
-          окон, более тёплые — во внутренних областях. Это не
-          полноценный расчёт ANSYS, а лёгкая визуализация, связанная
-          с исходными параметрами цифрового двойника.
+
+        <p className="text-sm text-slate-600 mb-4">
+          Визуализация показывает распределение температур на внутренней поверхности 
+          стены и окон при расчётной температуре наружного воздуха.
         </p>
 
-        <ThermalMap2D
-          wallArea={wallArea}
-          windowArea={windowArea}
-          Qdesign={Qdesign}
-          T_inside={T_inside}
-          Tdesign={Tdesign}
+        <ThermalMap2DPro
+          Tinside={T_inside}
+          Tout={Tdesign}
+          Uwall={Uwall}
+          Uw={Uw}
+          windowShare={windowArea / (wallArea + windowArea)}
         />
+
+        {/* Легенда */}
+        <div className="mt-4">
+          <GradientLegend
+            min={Tsi_wall - 5}
+            max={T_inside}
+            label="Температура поверхности, °C"
+          />
+        </div>
       </div>
 
-      <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4 sm:p-5 text-xs sm:text-sm text-slate-600">
-        <p>
-          Стена:{" "}
-          <span className="font-medium">
-            {wallResolved?.label || "пользовательская конструкция"}
-          </span>
-          , U = {wallResolved?.Uwall?.toFixed(3)} Вт/(м²·К)
-        </p>
-        <p>
-          Окна:{" "}
-          <span className="font-medium">
-            {winType?.label || "тип не задан"}
-          </span>
-          , U = {winType?.Uw?.toFixed(2)} Вт/(м²·К)
-        </p>
+      {/* Характеристики */}
+      <div className="bg-slate-50 rounded-2xl border border-slate-200 p-5">
+        <h3 className="font-semibold mb-2">Характеристики ограждений</h3>
+
+        <div className="grid sm:grid-cols-2 gap-4 text-sm text-slate-700">
+          <div>
+            <p className="font-medium">Стена</p>
+            <p>U = {Uwall.toFixed(3)} Вт/м²·К</p>
+            <p>Температура поверхности: {Tsi_wall.toFixed(1)} °C</p>
+          </div>
+
+          <div>
+            <p className="font-medium">Окно</p>
+            <p>U = {Uw.toFixed(2)} Вт/м²·К</p>
+            <p>Температура поверхности: {Tsi_win.toFixed(1)} °C</p>
+          </div>
+        </div>
+
+        {/* РИСК КОНДЕНСАТА */}
+        <div className="mt-4 p-4 rounded-xl bg-white border border-slate-200 shadow-sm">
+          <p className="font-semibold text-slate-900 mb-1">
+            Риск конденсации
+          </p>
+
+          <p className="text-sm text-slate-700">
+            Точка росы: {risk.dewPoint.toFixed(1)} °C  
+            <br />
+            Температура поверхности стены: {risk.surfaceTemp.toFixed(1)} °C  
+            <br />
+          </p>
+
+          <div className="mt-3">
+            <RiskBar
+              label="Уровень риска"
+              value={risk.riskIndex}
+            />
+          </div>
+
+          <p className="mt-1 text-xs text-slate-500">
+            Если температура поверхности ниже точки росы — возможно образование 
+            конденсата и плесени.
+          </p>
+        </div>
       </div>
     </section>
   );
 }
+
 
 /* ---------- TAB: UNCERTAINTY ---------- */
 
